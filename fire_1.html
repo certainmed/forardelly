@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Countdown Tahun Baru 2026</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #020202;
+            color: white;
+            font-family: 'Roboto', sans-serif;
+            user-select: none;
+        }
+
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            text-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
+
+        #countdown-container {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px 40px;
+            border-radius: 15px;
+            backdrop-filter: blur(2px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2rem;
+            letter-spacing: 5px;
+            margin-bottom: 20px;
+            color: #ffeb3b;
+            text-transform: uppercase;
+            min-width: 300px; /* Menjaga lebar agar tidak goyang saat animasi titik */
+        }
+
+        /* ANIMASI TITIK-TITIK "Please wait" */
+        .loading-text::after {
+            content: ' .';
+            animation: dots 1.5s steps(5, end) infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: ' .'; }
+            40% { content: ' ..'; }
+            60% { content: ' ...'; }
+            80%, 100% { content: ''; }
+        }
+
+        #timer {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 4rem;
+            font-weight: 700;
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .time-unit {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .time-label {
+            font-size: 0.8rem;
+            font-family: 'Roboto', sans-serif;
+            color: #aaa;
+            margin-top: 5px;
+        }
+
+        #instruction {
+            position: absolute;
+            bottom: 30px;
+            font-size: 0.9rem;
+            opacity: 0.7;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.4; }
+            50% { opacity: 1; }
+            100% { opacity: 0.4; }
+        }
+
+        @media (max-width: 768px) {
+            #timer { font-size: 2.5rem; gap: 10px; }
+            h1 { font-size: 1.2rem; }
+            #countdown-container { padding: 15px; width: 90%; }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="canvas"></canvas>
+
+    <div id="ui-layer">
+        <div id="countdown-container">
+            <h1 id="title-text" class="loading-text">Please wait</h1>
+            <div id="timer">
+                <div class="time-unit"><span id="days">00</span><span class="time-label">DAYS</span></div>
+                <div class="time-unit">:</div>
+                <div class="time-unit"><span id="hours">00</span><span class="time-label">HOURS</span></div>
+                <div class="time-unit">:</div>
+                <div class="time-unit"><span id="minutes">00</span><span class="time-label">MINUTES</span></div>
+                <div class="time-unit">:</div>
+                <div class="time-unit"><span id="seconds">00</span><span class="time-label">SECONDS</span></div>
+            </div>
+        </div>
+        <div id="instruction">click the screen to launch firework!</div>
+    </div>
+
+    <script>
+        // --- KONFIGURASI AUDIO SINTESIS (Web Audio API) ---
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new AudioContext();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playLaunchSound() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+            
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.3);
+        }
+
+        function playExplosionSound(volume = 0.5, type = 'normal') {
+            if (!audioCtx) return;
+            
+            const bufferSize = audioCtx.sampleRate * 2;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+
+            const gain = audioCtx.createGain();
+            const filter = audioCtx.createBiquadFilter();
+            
+            if (type === 'heavy') {
+                filter.type = 'lowpass';
+                filter.frequency.value = 400;
+                volume *= 1.2;
+            } else {
+                filter.type = 'lowpass';
+                filter.frequency.value = 800;
+            }
+
+            noise.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+            gain.gain.setValueAtTime(volume, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 1);
+
+            noise.start(now);
+            noise.stop(now + 1);
+        }
+
+        // --- VISUAL KEMBANG API ---
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        let fireworks = [];
+        let particles = [];
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function random(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        class Firework {
+            constructor(tx, ty) {
+                this.x = width / 2;
+                this.y = height;
+                this.tx = tx;
+                this.ty = ty;
+                this.distanceToTarget = Math.sqrt(Math.pow(this.tx - this.x, 2) + Math.pow(this.ty - this.y, 2));
+                this.distanceTraveled = 0;
+                this.coordinates = [];
+                this.coordinateCount = 3;
+                
+                const angle = Math.atan2(this.ty - this.y, this.tx - this.x);
+                this.speed = 2;
+                this.acceleration = 1.05;
+                this.brightness = random(50, 70);
+                
+                this.vx = Math.cos(angle) * this.speed;
+                this.vy = Math.sin(angle) * this.speed;
+
+                while (this.coordinateCount--) {
+                    this.coordinates.push([this.x, this.y]);
+                }
+
+                playLaunchSound();
+            }
+
+            update(index) {
+                this.coordinates.pop();
+                this.coordinates.unshift([this.x, this.y]);
+
+                this.speed *= this.acceleration;
+                const vx = Math.cos(Math.atan2(this.ty - this.y, this.tx - this.x)) * this.speed;
+                const vy = Math.sin(Math.atan2(this.ty - this.y, this.tx - this.x)) * this.speed;
+                
+                this.distanceTraveled = Math.sqrt(Math.pow(this.x - (width/2), 2) + Math.pow(this.y - height, 2));
+
+                const currentDistance = Math.sqrt(Math.pow(this.tx - this.x, 2) + Math.pow(this.ty - this.y, 2));
+                
+                if (currentDistance < this.speed * 2 || this.y <= this.ty) {
+                    createParticles(this.tx, this.ty);
+                    fireworks.splice(index, 1);
+                } else {
+                    this.x += vx;
+                    this.y += vy;
+                }
+            }
+
+            draw() {
+                ctx.beginPath();
+                if (this.coordinates.length > 0) {
+                    ctx.moveTo(this.coordinates[this.coordinates.length - 1][0], this.coordinates[this.coordinates.length - 1][1]);
+                    ctx.lineTo(this.x, this.y);
+                    ctx.strokeStyle = 'hsl(' + random(30, 50) + ', 100%, ' + this.brightness + '%)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            }
+        }
+
+        class Particle {
+            constructor(x, y, hue, type) {
+                this.x = x;
+                this.y = y;
+                this.coordinates = [];
+                this.coordinateCount = type === 'willow' ? 10 : 5;
+                
+                let angle = random(0, Math.PI * 2);
+                let speed = random(1, 10);
+                
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                
+                this.friction = type === 'willow' ? 0.90 : 0.95;
+                this.gravity = type === 'willow' ? 0.5 : 1;
+                
+                this.hue = hue;
+                this.brightness = random(50, 80);
+                this.alpha = 1;
+                this.decay = random(0.010, 0.025);
+                this.type = type;
+
+                while (this.coordinateCount--) {
+                    this.coordinates.push([this.x, this.y]);
+                }
+            }
+
+            update(index) {
+                this.coordinates.pop();
+                this.coordinates.unshift([this.x, this.y]);
+
+                this.vx *= this.friction;
+                this.vy *= this.friction;
+                this.vy += this.gravity * 0.1;
+
+                this.x += this.vx;
+                this.y += this.vy;
+                this.alpha -= this.decay;
+
+                if (this.type === 'flicker') {
+                    this.brightness = random(50, 100);
+                }
+
+                if (this.alpha <= this.decay) {
+                    particles.splice(index, 1);
+                }
+            }
+
+            draw() {
+                ctx.beginPath();
+                if (this.coordinates.length > 0) {
+                    ctx.moveTo(this.coordinates[this.coordinates.length - 1][0], this.coordinates[this.coordinates.length - 1][1]);
+                    ctx.lineTo(this.x, this.y);
+                    ctx.strokeStyle = `hsla(${this.hue}, 100%, ${this.brightness}%, ${this.alpha})`;
+                    
+                    if(this.type === 'willow') {
+                        ctx.lineWidth = 1.5;
+                    } else {
+                        ctx.lineWidth = 2;
+                    }
+                    
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function createParticles(x, y) {
+            let particleCount = 100;
+            const hue = random(0, 360);
+            const rand = Math.random();
+            let type = 'normal';
+            if (rand > 0.7) type = 'willow';
+            else if (rand > 0.4) type = 'flicker';
+
+            playExplosionSound(0.3, type === 'willow' ? 'heavy' : 'normal');
+
+            if (type === 'willow') {
+                particleCount = 150;
+                for (let i = 0; i < particleCount; i++) {
+                    particles.push(new Particle(x, y, 45, 'willow'));
+                }
+            } else {
+                for (let i = 0; i < particleCount; i++) {
+                    particles.push(new Particle(x, y, type === 'flicker' ? random(0, 360) : hue, type));
+                }
+            }
+        }
+
+        function loop() {
+            requestAnimationFrame(loop);
+
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.fillRect(0, 0, width, height);
+            
+            ctx.globalCompositeOperation = 'lighter';
+
+            let i = fireworks.length;
+            while (i--) {
+                fireworks[i].draw();
+                fireworks[i].update(i);
+            }
+
+            let j = particles.length;
+            while (j--) {
+                particles[j].draw();
+                particles[j].update(j);
+            }
+
+            // --- LOGIKA PENAMBAHAN PETASAN (11 PM - 00 AM) ---
+            if (timerLoop) {
+                let chance = 0.03; // Base chance normal
+                
+                const now = new Date().getTime();
+                const diff = targetDate - now;
+                const oneHour = 60 * 60 * 1000; // 1 jam dalam milidetik
+
+                // Jika kurang dari 1 jam menuju tahun baru (mulai 11:00 PM)
+                if (diff <= oneHour && diff > 0) {
+                    // Hitung progress dari 0 (11 PM) sampai 1 (00 AM)
+                    // Semakin dekat diff ke 0, progress semakin dekat ke 1
+                    const progress = 1 - (diff / oneHour);
+                    
+                    // Interpolasi linear: dari 0.03 (normal) ke 0.2 (heboh)
+                    chance = 0.03 + (progress * (0.2 - 0.03));
+                }
+
+                if (Math.random() < chance) { 
+                    const startX = width/2 + random(-200, 200); 
+                    fireworks.push(new Firework(random(100, width - 100), random(100, height / 2)));
+                }
+            } else {
+                // Saat SUDAH TAHUN BARU (Puncak Perayaan)
+                if (Math.random() < 0.25) {
+                    fireworks.push(new Firework(random(50, width - 50), random(50, height / 2)));
+                }
+            }
+        }
+
+        // --- COUNTDOWN LOGIC ---
+        const targetDate = new Date('January 01, 2026 00:00:00').getTime();
+        
+        let timerLoop = true;
+        const domDays = document.getElementById('days');
+        const domHours = document.getElementById('hours');
+        const domMinutes = document.getElementById('minutes');
+        const domSeconds = document.getElementById('seconds');
+        const titleText = document.getElementById('title-text');
+        const timerContainer = document.getElementById('timer');
+
+        function updateCountdown() {
+            const now = new Date().getTime();
+            const distance = targetDate - now;
+
+            if (distance < 0) {
+                // TAHUN BARU!
+                timerLoop = false;
+                
+                // Hapus kelas animasi titik-titik agar tidak mengganggu pesan akhir
+                titleText.classList.remove('loading-text');
+                
+                // Update Pesan Sesuai Permintaan
+                titleText.innerHTML = "Happy New Year!<br><span style='color:cyan; font-size: 1.5em;'>2026!</span>";
+                titleText.style.fontSize = "3rem";
+                
+                timerContainer.style.display = 'none';
+                document.getElementById('instruction').innerText = "congratulations you survived one year on earth!";
+                
+                // Pembukaan ledakan
+                for(let k=0; k<5; k++) {
+                    setTimeout(() => {
+                         fireworks.push(new Firework(random(100, width - 100), random(100, height / 3)));
+                    }, k * 300);
+                }
+                return;
+            }
+
+            const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+            domDays.innerText = days < 10 ? '0' + days : days;
+            domHours.innerText = hours < 10 ? '0' + hours : hours;
+            domMinutes.innerText = minutes < 10 ? '0' + minutes : minutes;
+            domSeconds.innerText = seconds < 10 ? '0' + seconds : seconds;
+        }
+
+        setInterval(updateCountdown, 1000);
+        updateCountdown();
+
+        // --- INTERAKSI USER ---
+        canvas.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            initAudio();
+            fireworks.push(new Firework(e.clientX, e.clientY));
+        });
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            initAudio();
+            for (let i = 0; i < e.touches.length; i++) {
+                fireworks.push(new Firework(e.touches[i].clientX, e.touches[i].clientY));
+            }
+        });
+
+        loop();
+
+    </script>
+</body>
+</html>
